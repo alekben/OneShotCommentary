@@ -2,14 +2,26 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request) {
   try {
+    // Parse request body
     const body = await request.json();
+    const { channel, prompt, agentName} = body;
+    
+    // Validate required fields from request
+    if (!channel || !prompt || !agentName) {
+      return Response.json(
+        { error: 'Missing required fields: channel, prompt, and agentName are required' },
+        { status: 400 }
+        );
+    }
     
     const agoraUsername = process.env.AGORA_USERNAME;
     const agoraPassword = process.env.AGORA_PASSWORD;
     const agoraAppId = process.env.AGORA_APP_ID;
-    const publicUrl = process.env.PUBLIC_URL;
+    const ttsKey = process.env.TTS_KEY;
+    const llmUrl = process.env.LLM_URL;
+    const llmApiKey = process.env.LLM_API_KEY;
 
-    if (!agoraUsername || !agoraPassword || !agoraAppId || !publicUrl) {
+    if (!agoraUsername || !agoraPassword || !agoraAppId || !ttsKey) {
       return NextResponse.json(
         { error: 'Missing required environment variables' },
         { status: 500 }
@@ -20,54 +32,79 @@ export async function POST(request) {
     const authToken = Buffer.from(`${agoraUsername}:${agoraPassword}`).toString('base64');
 
     // Prepare the request to Agora ConvoAI API
-    const agoraRequest = {
-      appId: agoraAppId,
-      channelName: body.channelName || `channel_${Date.now()}`,
-      token: body.token || null,
-      agentConfig: {
-        agentId: body.agentId || null,
-        agentName: body.agentName || 'OneShotAgent',
+    const agoraRequestBody = {
+      name: agentName,
+      properties: {
+        channel: channel,
+        token: "",
+        agent_rtc_uid: "8888",
+        remote_rtc_uids: ["12345"],
+        enable_string_uid: false,
+        idle_timeout: 120,
+        advanced_features: {
+          enable_rtm: "true"
+        },
+        asr: {
+          vendor: "microsoft",
+          params: {
+            key: "key",
+            region: "eastus",
+            language: "en-US",
+          },
+        },
+        parameters: {
+          audio_scenario: "chorus",
+          data_channel: "rtm",
+          transcript: {
+            enable: true
+          }
+        },
         llm: {
-          provider: body.llmProvider || 'custom',
-          endpoint: `${publicUrl}/api/chat/completions`,
-          apiKey: body.llmApiKey || null,
-          model: body.llmModel || 'gpt-4',
-          temperature: body.temperature || 0.7,
-          maxTokens: body.maxTokens || 500,
+          url: llmUrl,
+          api_key: llmApiKey,
+          system_messages: [
+            {
+              role: "system",
+              content: prompt
+            }
+          ],
+          greeting_message: "",
+          failure_message: "Error.",
+          max_history: 1,
+          input_modalities: ["text"],
+          output_modalities: ["text"],
+          params: {
+            model: "gpt-4o-mini"
+          },
+          greeting_interruptable: false
         },
         tts: {
-          provider: body.ttsProvider || 'azure',
-          voice: body.ttsVoice || 'en-US-JennyNeural',
-          key: body.ttsKey || null,
-          region: body.ttsRegion || 'eastus',
-        },
-        context: body.context || '',
-        enableTTS: body.enableTTS !== false,
-        enableSTT: body.enableSTT !== false,
-      },
-      callback: {
-        url: `${publicUrl}/api/sendrtm`,
-      },
+          vendor: "microsoft",
+          params: {
+            key: ttsKey,
+            region: "eastus",
+            voice_name: "en-US-AvaMultilingualNeural",
+            sample_rate: 24000
+          }
+        }
+      }
     };
 
     // Call Agora ConvoAI API
-    // Note: Replace {projectId} with your actual Agora project ID
-    // You may want to add AGORA_PROJECT_ID to environment variables
-    const projectId = process.env.AGORA_PROJECT_ID || '{projectId}';
-    const response = await fetch(`https://api.agora.io/v1/projects/${projectId}/rtc/ai-agent/conversations`, {
+    const response = await fetch(`https://api.agora.io/api/conversational-ai-agent/v2/projects/${agoraAppId}/join`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Basic ${authToken}`,
       },
-      body: JSON.stringify(agoraRequest),
+      body: JSON.stringify(agoraRequestBody),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Agora API error:', errorText);
       return NextResponse.json(
-        { error: 'Failed to start conversation', details: errorText },
+        { error: 'Failed to start agent', details: errorText },
         { status: response.status }
       );
     }
@@ -75,7 +112,7 @@ export async function POST(request) {
     const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error('Error starting conversation:', error);
+    console.error('Error starting agent:', error);
     return NextResponse.json(
       { error: 'Internal server error', details: error.message },
       { status: 500 }

@@ -1,90 +1,123 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export default function AudioVisualizer({ audioTrack, isActive }) {
   const canvasRef = useRef(null);
   const animationFrameRef = useRef(null);
   const analyserRef = useRef(null);
-  const dataArrayRef = useRef(null);
+  const [volume, setVolume] = useState(0);
 
   useEffect(() => {
     if (!audioTrack || !isActive) {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
+      setVolume(0);
       return;
     }
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    let audioContext;
+    let analyser;
+    let source;
 
-    const ctx = canvas.getContext('2d');
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const source = audioContext.createMediaStreamSource(new MediaStream([audioTrack]));
-    const analyser = audioContext.createAnalyser();
-    
-    analyser.fftSize = 256;
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    
-    source.connect(analyser);
-    analyserRef.current = analyser;
-    dataArrayRef.current = dataArray;
+    try {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.8;
 
-    const draw = () => {
-      if (!analyserRef.current || !dataArrayRef.current) return;
-
-      animationFrameRef.current = requestAnimationFrame(draw);
+      // Get MediaStreamTrack from Agora audio track
+      const mediaStreamTrack = audioTrack.getMediaStreamTrack 
+        ? audioTrack.getMediaStreamTrack() 
+        : (audioTrack.getTrack ? audioTrack.getTrack() : null);
       
-      analyserRef.current.getByteFrequencyData(dataArrayRef.current);
-      
-      ctx.fillStyle = 'rgb(0, 0, 0)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      const barWidth = (canvas.width / bufferLength) * 2.5;
-      let barHeight;
-      let x = 0;
-      
-      for (let i = 0; i < bufferLength; i++) {
-        barHeight = dataArrayRef.current[i] / 2;
-        
-        const r = barHeight + 25;
-        const g = 250 - barHeight;
-        const b = 50;
-        
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-        
-        x += barWidth + 1;
+      if (!mediaStreamTrack) {
+        console.warn('Could not get MediaStreamTrack from audio track');
+        return;
       }
-    };
 
-    draw();
+      source = audioContext.createMediaStreamSource(new MediaStream([mediaStreamTrack]));
+      source.connect(analyser);
+
+      analyserRef.current = analyser;
+
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const ctx = canvas.getContext('2d');
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const draw = () => {
+        if (!isActive || !audioTrack) {
+          return;
+        }
+
+        animationFrameRef.current = requestAnimationFrame(draw);
+        analyser.getByteFrequencyData(dataArray);
+
+        // Calculate average volume
+        const average = dataArray.reduce((sum, value) => sum + value, 0) / bufferLength;
+        const normalizedVolume = average / 255;
+        setVolume(normalizedVolume);
+
+        // Clear canvas
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw bars
+        const barWidth = canvas.width / bufferLength;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+          const barHeight = (dataArray[i] / 255) * canvas.height;
+
+          const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - barHeight);
+          gradient.addColorStop(0, '#667eea');
+          gradient.addColorStop(1, '#764ba2');
+
+          ctx.fillStyle = gradient;
+          ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+
+          x += barWidth + 1;
+        }
+      };
+
+      draw();
+    } catch (error) {
+      console.error('Error setting up audio visualizer:', error);
+    }
 
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
-      audioContext.close();
+      if (source) {
+        try {
+          source.disconnect();
+        } catch (e) {
+          // Ignore disconnect errors
+        }
+      }
+      if (audioContext && audioContext.state !== 'closed') {
+        audioContext.close().catch(() => {
+          // Ignore close errors
+        });
+      }
     };
   }, [audioTrack, isActive]);
 
   return (
-    <div className="audio-visualizer">
+    <div className="audio-visualizer-container">
       <canvas
         ref={canvasRef}
         width={400}
-        height={200}
-        style={{
-          width: '100%',
-          maxWidth: '400px',
-          height: '200px',
-          borderRadius: '8px',
-          backgroundColor: '#000',
-        }}
+        height={150}
+        className="audio-visualizer-canvas"
       />
+      {!isActive && (
+        <div className="audio-visualizer-placeholder">
+          <p>Audio visualizer will appear when conversation starts</p>
+        </div>
+      )}
     </div>
   );
 }
