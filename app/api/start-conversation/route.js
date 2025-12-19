@@ -45,12 +45,8 @@ export async function POST(request) {
           enable_rtm: "true"
         },
         asr: {
-          vendor: "microsoft",
-          params: {
-            key: "key",
-            region: "eastus",
-            language: "en-US",
-          },
+          vendor: "ares",
+          language: "en-US"
         },
         parameters: {
           audio_scenario: "chorus",
