@@ -12,6 +12,7 @@ export default function Home() {
   const [stateLogs, setStateLogs] = useState([]);
   const defaultMessageStr = "{game:Blackjack,players:{John:{outcome:bust,value:25},Frank:{outcome:win,value:21},House:{outcome:bust,value:23}},events:{John:'hit with 10 without going over',Frank:'hit 3 times in a row without busting'}}";
   const [messageInput, setMessageInput] = useState(defaultMessageStr);
+  const [sayDirectlyInput, setSayDirectlyInput] = useState('');
   
   const rtcClientRef = useRef(null);
   const rtmClientRef = useRef(null);
@@ -21,6 +22,7 @@ export default function Home() {
   const agoraRTCRef = useRef(null);
   const agoraRTMRef = useRef(null);
   const previousAgentStateRef = useRef('stopped');
+  const sayDirectlyInputRef = useRef('');
 
   // Load Agora SDKs dynamically on client side
   useEffect(() => {
@@ -77,6 +79,9 @@ export default function Home() {
       setIsLoading(true);
       setError(null);
       setAgentState('starting');
+      
+      // Update ref with current value
+      sayDirectlyInputRef.current = sayDirectlyInput;
 
       //Get Agora App ID from environment variables
       const agoraAppId = process.env.NEXT_PUBLIC_AGORA_APP_ID;
@@ -141,7 +146,7 @@ export default function Home() {
           console.log(`[DEBUG] ${new Date().toISOString()} RTM Agent state from presence: ${newState}`);
           
           // Check if transitioning from 'speaking' to another state
-          if (previousAgentStateRef.current === 'silent' && newState == 'silent') {
+          if ((previousAgentStateRef.current === 'silent' || previousAgentStateRef.current === 'speaking') && newState == 'silent') {
             // Trigger handleStop when transitioning from 'speaking' to any other state
             handleStop();
             return; // Don't update state here, handleStop will manage it
@@ -162,30 +167,86 @@ export default function Home() {
 
           // Send RTM message to agent when state is 'idle'
           if (newState === 'idle') {
-            // Send RTM message to agent directly
-            try {
-              const messageStr = (messageInput && messageInput.trim()) || defaultMessageStr;
-              const timestamp = new Date().toISOString();
-              setStateLogs((prevLogs) => [
-                ...prevLogs,
-                { timestamp, state: `Sent JSON: ${messageStr}` }
-              ]);
-              const agentUserId = "8888"
-              
-              const publishOptions = {
-                channelType: "USER",
-                customType: "user.transcription"
+            // Check if "Say Directly" field has content
+            const sayDirectlyText = sayDirectlyInputRef.current && sayDirectlyInputRef.current.trim();
+            
+            if (sayDirectlyText) {
+              // Use /api/speak endpoint instead of RTM
+              try {
+                const timestamp = new Date().toISOString();
+                setStateLogs((prevLogs) => [
+                  ...prevLogs,
+                  { timestamp, state: `Sending direct message: ${sayDirectlyText}` }
+                ]);
+                
+                if (agentIdRef.current) {
+                  const speakResponse = await fetch('/api/speak', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                      agentId: agentIdRef.current,
+                      text: sayDirectlyText,
+                      priority: 'INTERRUPT',
+                      interruptable: false,
+                    }),
+                  });
+                  
+                  if (speakResponse.ok) {
+                    const speakData = await speakResponse.json();
+                    const successTimestamp = new Date().toISOString();
+                    setStateLogs((prevLogs) => [
+                      ...prevLogs,
+                      { timestamp: successTimestamp, state: 'Direct message sent successfully' }
+                    ]);
+                    console.log('✅ Successfully sent direct message via /api/speak:', speakData);
+                  } else {
+                    const errorData = await speakResponse.json();
+                    console.error('❌ Failed to send direct message:', errorData);
+                    const errorTimestamp = new Date().toISOString();
+                    setStateLogs((prevLogs) => [
+                      ...prevLogs,
+                      { timestamp: errorTimestamp, state: `Failed to send direct message: ${errorData.error || 'Unknown error'}` }
+                    ]);
+                  }
+                } else {
+                  console.error('Agent ID not available');
+                }
+              } catch (speakError) {
+                console.error('❌ Failed to send direct message:', speakError);
+                const errorTimestamp = new Date().toISOString();
+                setStateLogs((prevLogs) => [
+                  ...prevLogs,
+                  { timestamp: errorTimestamp, state: `Error sending direct message: ${speakError.message}` }
+                ]);
               }
-              
-              if (rtmClientRef.current) {
-                const result = await rtmClientRef.current.publish(agentUserId, messageStr, publishOptions)
-                console.log('✅ Successfully sent message to agent RTC UID', agentUserId, ':', messageStr)
-              } else {
-                console.error('RTM client not available')
+            } else {
+              // Send RTM message to agent directly (original behavior)
+              try {
+                const messageStr = (messageInput && messageInput.trim()) || defaultMessageStr;
+                const timestamp = new Date().toISOString();
+                setStateLogs((prevLogs) => [
+                  ...prevLogs,
+                  { timestamp, state: `Sent JSON: ${messageStr}` }
+                ]);
+                const agentUserId = "8888"
+                
+                const publishOptions = {
+                  channelType: "USER",
+                  customType: "user.transcription"
+                }
+                
+                if (rtmClientRef.current) {
+                  const result = await rtmClientRef.current.publish(agentUserId, messageStr, publishOptions)
+                  console.log('✅ Successfully sent message to agent RTC UID', agentUserId, ':', messageStr)
+                } else {
+                  console.error('RTM client not available')
+                }
+              } catch (rtmError) {
+                console.error('❌ Failed to send RTM message:', rtmError)
+                // Don't throw here - the agent update was successful, RTM is secondary
               }
-            } catch (rtmError) {
-              console.error('❌ Failed to send RTM message:', rtmError)
-              // Don't throw here - the agent update was successful, RTM is secondary
             }
           }
         }
@@ -392,6 +453,7 @@ export default function Home() {
                   onChange={(e) => setMessageInput(e.target.value)}
                   placeholder={defaultMessageStr}
                   rows={5}
+                  disabled={sayDirectlyInput.trim().length > 0}
                   style={{
                     width: '100%',
                     padding: '0.5rem',
@@ -399,7 +461,32 @@ export default function Home() {
                     borderRadius: '4px',
                     border: '1px solid #ccc',
                     fontFamily: 'monospace',
-                    resize: 'vertical'
+                    resize: 'vertical',
+                    backgroundColor: sayDirectlyInput.trim().length > 0 ? '#f0f0f0' : 'white',
+                    color: sayDirectlyInput.trim().length > 0 ? '#999' : 'inherit',
+                    cursor: sayDirectlyInput.trim().length > 0 ? 'not-allowed' : 'text'
+                  }}
+                />
+              </div>
+              <div className="input-container" style={{ marginBottom: '1.5rem', width: '100%' }}>
+                <label htmlFor="say-directly-input" style={{ display: 'block', marginBottom: '0.5rem' }}>
+                  Say Directly:
+                </label>
+                <input
+                  id="say-directly-input"
+                  type="text"
+                  value={sayDirectlyInput}
+                  onChange={(e) => {
+                    setSayDirectlyInput(e.target.value);
+                    sayDirectlyInputRef.current = e.target.value;
+                  }}
+                  placeholder="Enter text to say directly..."
+                  style={{
+                    width: '100%',
+                    padding: '0.5rem',
+                    fontSize: '0.9rem',
+                    borderRadius: '4px',
+                    border: '1px solid #ccc',
                   }}
                 />
               </div>
