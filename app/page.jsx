@@ -10,6 +10,8 @@ export default function Home() {
   const [error, setError] = useState(null);
   const [remoteAudioTrack, setRemoteAudioTrack] = useState(null);
   const [stateLogs, setStateLogs] = useState([]);
+  const defaultMessageStr = "{game:Blackjack,players:{John:{outcome:bust,value:25},Frank:{outcome:win,value:21},House:{outcome:bust,value:23}},events:{John:'hit with 10 without going over',Frank:'hit 3 times in a row without busting'}}";
+  const [messageInput, setMessageInput] = useState(defaultMessageStr);
   
   const rtcClientRef = useRef(null);
   const rtmClientRef = useRef(null);
@@ -162,7 +164,12 @@ export default function Home() {
           if (newState === 'idle') {
             // Send RTM message to agent directly
             try {
-              const messageStr = "{game:Blackjack,players:{John:{outcome:bust,value:25},Frank:{outcome:win,value:21},House:{outcome:bust,value:23}},events:{John:'hit with 10 without going over',Frank:'hit 3 times in a row without busting'}}"
+              const messageStr = (messageInput && messageInput.trim()) || defaultMessageStr;
+              const timestamp = new Date().toISOString();
+              setStateLogs((prevLogs) => [
+                ...prevLogs,
+                { timestamp, state: `Sent JSON: ${messageStr}` }
+              ]);
               const agentUserId = "8888"
               
               const publishOptions = {
@@ -372,15 +379,40 @@ export default function Home() {
       <div className="content">
         <h1>One Shot Commentary</h1>
         
-        <div className="controls">
+        <div className="controls" style={!isConnected ? { flexDirection: 'column', alignItems: 'stretch', width: '100%' } : {}}>
           {!isConnected ? (
-            <button
-              onClick={handleStart}
-              disabled={isLoading}
-              className="btn btn-primary"
-            >
-              {isLoading ? 'Starting Agent...' : 'Generate Agent Commentary'}
-            </button>
+            <>
+              <div className="input-container" style={{ marginBottom: '1.5rem', width: '100%' }}>
+                <label htmlFor="message-input" style={{ display: 'block', marginBottom: '0.5rem' }}>
+                  Game State JSON:
+                </label>
+                <textarea
+                  id="message-input"
+                  value={messageInput}
+                  onChange={(e) => setMessageInput(e.target.value)}
+                  placeholder={defaultMessageStr}
+                  rows={5}
+                  style={{
+                    width: '100%',
+                    padding: '0.5rem',
+                    fontSize: '0.9rem',
+                    borderRadius: '4px',
+                    border: '1px solid #ccc',
+                    fontFamily: 'monospace',
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+              <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+                <button
+                  onClick={handleStart}
+                  disabled={isLoading}
+                  className="btn btn-primary"
+                >
+                  {isLoading ? 'Starting Agent...' : 'Generate Agent Commentary'}
+                </button>
+              </div>
+            </>
           ) : (
             <button
               onClick={handleStop}
