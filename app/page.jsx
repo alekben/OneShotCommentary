@@ -266,7 +266,7 @@ export default function Home() {
       }
 
       // Create Agora RTC client
-      agoraRTCRef.current.setLogLevel(4);
+      agoraRTCRef.current.setLogLevel(0);
       const rtcClient = agoraRTCRef.current.createClient({ mode: 'rtc', codec: 'vp8' });
       rtcClientRef.current = rtcClient;
 
