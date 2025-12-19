@@ -77,7 +77,6 @@ export default function Home() {
       setIsLoading(true);
       setError(null);
       setAgentState('starting');
-      setStateLogs([]); // Clear logs when starting a new session
 
       //Get Agora App ID from environment variables
       const agoraAppId = process.env.NEXT_PUBLIC_AGORA_APP_ID;
@@ -408,7 +407,7 @@ export default function Home() {
         <div className="visualizer-container">
           <AudioVisualizer
             audioTrack={remoteAudioTrack}
-            isActive={isConnected && ['speaking', 'listening', 'thinking'].includes(agentState)}
+            isActive={isConnected && ['idle', 'silent'].includes(agentState)}
           />
         </div>
 
